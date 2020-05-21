@@ -9,8 +9,6 @@ import com.xuggle.xuggler.IContainer;
 import com.xuggle.xuggler.IPacket;
 import com.xuggle.xuggler.IStream;
 import com.xuggle.xuggler.IStreamCoder;
-import java.awt.Dimension;
-import java.awt.Toolkit;
 import java.awt.image.BufferedImage;
 import java.io.File;
 import java.io.IOException;
@@ -28,7 +26,12 @@ public class MergeImageWithAudioExample {
     private static final String D1_AUDIO_PATH = "C:/Users/Petr_Filaretov/IdeaProjects/XugglerTest/media/audio/D1.mp3";
     private static final String E1_AUDIO_PATH = "C:/Users/Petr_Filaretov/IdeaProjects/XugglerTest/media/audio/E1.mp3";
 
+    // assume the number of packets in each audio
+    private static final int PACKETS_COUNT = 99;
+
     public static void main(String[] args) {
+        int seekFrameResult;
+
         // C1
         IContainer c1AudioContainer = IContainer.make();
 
@@ -38,12 +41,14 @@ public class MergeImageWithAudioExample {
         }
         // read audio file and create stream
         IStreamCoder c1AudioCoder = null;
+        int c1AudioStreamIndex = 0;
         for (int i = 0; i < c1AudioContainer.getNumStreams(); i++) {
             IStream stream = c1AudioContainer.getStream(i);
             IStreamCoder coder = stream.getStreamCoder();
 
             if (coder.getCodecType() == ICodec.Type.CODEC_TYPE_AUDIO) {
                 c1AudioCoder = coder;
+                c1AudioStreamIndex = i;
             }
         }
 
@@ -64,12 +69,14 @@ public class MergeImageWithAudioExample {
         }
         // read audio file and create stream
         IStreamCoder d1AudioCoder = null;
+        int d1AudioStreamIndex = 0;
         for (int i = 0; i < d1AudioContainer.getNumStreams(); i++) {
             IStream stream = d1AudioContainer.getStream(i);
             IStreamCoder coder = stream.getStreamCoder();
 
             if (coder.getCodecType() == ICodec.Type.CODEC_TYPE_AUDIO) {
                 d1AudioCoder = coder;
+                d1AudioStreamIndex = i;
             }
         }
 
@@ -81,9 +88,33 @@ public class MergeImageWithAudioExample {
             throw new IllegalArgumentException("Cannot open audio coder for " + D1_AUDIO_PATH);
         }
 
+        // E1
+        IContainer e1AudioContainer = IContainer.make();
 
+        // check files are readable
+        if (e1AudioContainer.open(E1_AUDIO_PATH, IContainer.Type.READ, null) < 0) {
+            throw new IllegalArgumentException("Cannot find " + E1_AUDIO_PATH);
+        }
+        // read audio file and create stream
+        IStreamCoder e1AudioCoder = null;
+        int e1AudioStreamIndex = 0;
+        for (int i = 0; i < e1AudioContainer.getNumStreams(); i++) {
+            IStream stream = e1AudioContainer.getStream(i);
+            IStreamCoder coder = stream.getStreamCoder();
 
+            if (coder.getCodecType() == ICodec.Type.CODEC_TYPE_AUDIO) {
+                e1AudioCoder = coder;
+                e1AudioStreamIndex = i;
+            }
+        }
 
+        if (e1AudioCoder == null) {
+            throw new IllegalArgumentException("Cannot find audio stream for " + E1_AUDIO_PATH);
+        }
+
+        if (e1AudioCoder.open(null, null) < 0) {
+            throw new IllegalArgumentException("Cannot open audio coder for " + E1_AUDIO_PATH);
+        }
 
         // make a IMediaWriter to write the file.
         final IMediaWriter writer = ToolFactory.makeWriter(OUTPUT_FILENAME);
@@ -108,11 +139,12 @@ public class MergeImageWithAudioExample {
         int sampleRate = c1AudioCoder.getSampleRate();
         int audioStreamIndex = writer.addAudioStream(audioInputIndex, audioStreamId, channelCount, sampleRate);
 
-
         IPacket packet = IPacket.make();
         long startTime = System.nanoTime();
 
-        while (c1AudioContainer.readNextPacket(packet) >= 0) {
+        // c1.4
+        long c1Iteration = 0;
+        while (c1AudioContainer.readNextPacket(packet) >= 0 && c1Iteration != PACKETS_COUNT / 4) {
             writer.encodeVideo(videoStreamIndex, backgroundImage, System.nanoTime() - startTime, TimeUnit.NANOSECONDS);
 
             IAudioSamples samples = IAudioSamples.make(512, c1AudioCoder.getChannels(), IAudioSamples.Format.FMT_S32);
@@ -120,9 +152,13 @@ public class MergeImageWithAudioExample {
             if (samples.isComplete()) {
                 writer.encodeAudio(audioStreamIndex, samples);
             }
+
+            c1Iteration++;
         }
 
-        while (d1AudioContainer.readNextPacket(packet) >= 0) {
+        // d1.8
+        long d1Iteration = 0;
+        while (d1AudioContainer.readNextPacket(packet) >= 0 && d1Iteration != PACKETS_COUNT / 8) {
             writer.encodeVideo(videoStreamIndex, backgroundImage, System.nanoTime() - startTime, TimeUnit.NANOSECONDS);
 
             IAudioSamples samples = IAudioSamples.make(512, d1AudioCoder.getChannels(), IAudioSamples.Format.FMT_S32);
@@ -130,6 +166,106 @@ public class MergeImageWithAudioExample {
             if (samples.isComplete()) {
                 writer.encodeAudio(audioStreamIndex, samples);
             }
+
+            d1Iteration++;
+        }
+
+        // scroll to the beginning of the audio file
+        seekFrameResult = d1AudioContainer
+            .seekKeyFrame(d1AudioStreamIndex, d1AudioContainer.getStartTime(), IContainer.SEEK_FLAG_ANY);
+        if (seekFrameResult < 0) {
+            throw new RuntimeException("Cannot seek key frame");
+        }
+
+        // d1.8
+        d1Iteration = 0;
+        while (d1AudioContainer.readNextPacket(packet) >= 0 && d1Iteration != PACKETS_COUNT / 8) {
+            writer.encodeVideo(videoStreamIndex, backgroundImage, System.nanoTime() - startTime, TimeUnit.NANOSECONDS);
+
+            IAudioSamples samples = IAudioSamples.make(512, d1AudioCoder.getChannels(), IAudioSamples.Format.FMT_S32);
+            d1AudioCoder.decodeAudio(samples, packet, 0);
+            if (samples.isComplete()) {
+                writer.encodeAudio(audioStreamIndex, samples);
+            }
+
+            d1Iteration++;
+        }
+
+        // e1.16
+        long e1Iteration = 0;
+        while (e1AudioContainer.readNextPacket(packet) >= 0 && e1Iteration != PACKETS_COUNT / 16) {
+            writer.encodeVideo(videoStreamIndex, backgroundImage, System.nanoTime() - startTime, TimeUnit.NANOSECONDS);
+
+            IAudioSamples samples = IAudioSamples.make(512, e1AudioCoder.getChannels(), IAudioSamples.Format.FMT_S32);
+            e1AudioCoder.decodeAudio(samples, packet, 0);
+            if (samples.isComplete()) {
+                writer.encodeAudio(audioStreamIndex, samples);
+            }
+
+            e1Iteration++;
+        }
+
+        // scroll to the beginning of the audio file
+        seekFrameResult = e1AudioContainer
+            .seekKeyFrame(e1AudioStreamIndex, e1AudioContainer.getStartTime(), IContainer.SEEK_FLAG_ANY);
+        if (seekFrameResult < 0) {
+            throw new RuntimeException("Cannot seek key frame");
+        }
+
+        // e1.16
+        e1Iteration = 0;
+        while (e1AudioContainer.readNextPacket(packet) >= 0 && e1Iteration != PACKETS_COUNT / 16) {
+            writer.encodeVideo(videoStreamIndex, backgroundImage, System.nanoTime() - startTime, TimeUnit.NANOSECONDS);
+
+            IAudioSamples samples = IAudioSamples.make(512, e1AudioCoder.getChannels(), IAudioSamples.Format.FMT_S32);
+            e1AudioCoder.decodeAudio(samples, packet, 0);
+            if (samples.isComplete()) {
+                writer.encodeAudio(audioStreamIndex, samples);
+            }
+
+            e1Iteration++;
+        }
+
+        // scroll to the beginning of the audio file
+        seekFrameResult = e1AudioContainer
+            .seekKeyFrame(e1AudioStreamIndex, e1AudioContainer.getStartTime(), IContainer.SEEK_FLAG_ANY);
+        if (seekFrameResult < 0) {
+            throw new RuntimeException("Cannot seek key frame");
+        }
+
+        // e1.16
+        e1Iteration = 0;
+        while (e1AudioContainer.readNextPacket(packet) >= 0 && e1Iteration != PACKETS_COUNT / 16) {
+            writer.encodeVideo(videoStreamIndex, backgroundImage, System.nanoTime() - startTime, TimeUnit.NANOSECONDS);
+
+            IAudioSamples samples = IAudioSamples.make(512, e1AudioCoder.getChannels(), IAudioSamples.Format.FMT_S32);
+            e1AudioCoder.decodeAudio(samples, packet, 0);
+            if (samples.isComplete()) {
+                writer.encodeAudio(audioStreamIndex, samples);
+            }
+
+            e1Iteration++;
+        }
+
+        // scroll to the beginning of the audio file
+        seekFrameResult = e1AudioContainer
+            .seekKeyFrame(e1AudioStreamIndex, e1AudioContainer.getStartTime(), IContainer.SEEK_FLAG_ANY);
+        if (seekFrameResult < 0) {
+            throw new RuntimeException("Cannot seek key frame");
+        }
+
+        // e1.16
+        e1Iteration = 0;
+        while (e1AudioContainer.readNextPacket(packet) >= 0 && e1Iteration != PACKETS_COUNT / 16) {
+            writer.encodeVideo(videoStreamIndex, backgroundImage, System.nanoTime() - startTime, TimeUnit.NANOSECONDS);
+
+            IAudioSamples samples = IAudioSamples.make(512, e1AudioCoder.getChannels(), IAudioSamples.Format.FMT_S32);
+            e1AudioCoder.decodeAudio(samples, packet, 0);
+            if (samples.isComplete()) {
+                writer.encodeAudio(audioStreamIndex, samples);
+            }
+
+            e1Iteration++;
         }
 
         c1AudioCoder.close();
@@ -137,6 +273,9 @@ public class MergeImageWithAudioExample {
 
         d1AudioCoder.close();
         d1AudioContainer.close();
+
+        e1AudioCoder.close();
+        e1AudioContainer.close();
 
         // tell the writer to close and write the trailer if needed
         writer.close();
