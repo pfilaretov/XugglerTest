@@ -1,4 +1,4 @@
-package com.pfilaretov.test.xuggler;
+package ru.pfilaretov.test.xuggler;
 
 import com.xuggle.xuggler.ICodec;
 import com.xuggle.xuggler.IContainer;
